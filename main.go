@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -26,33 +27,62 @@ func lshExit() {
 	os.Exit(0)
 }
 
-func lshLaunch(args []string) error {
+func lshLaunch(args []string, args2 []string) error {
+	// todo: Better approach
+	// https://stackoverflow.com/a/26541826/12902317
+	r, w := io.Pipe()
 	cmd := exec.Command(args[0], args[1:]...)
+	cmd2 := exec.Command(args2[0], args2[1:]...)
+	fmt.Println(cmd.String())
+	fmt.Println(cmd2.String())
 
 	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = w
+	cmd2.Stdin = r
+	cmd2.Stdout = os.Stdout
+	cmd2.Stderr = os.Stderr
 
-	return cmd.Run()
+	cmd.Start()
+	cmd2.Start()
+
+	go func() {
+		defer w.Close()
+		cmd.Wait()
+	}()
+
+	
+	return cmd2.Wait()
 }
 
 func lshExecute(input string) error {
 	input = strings.TrimSuffix(input, "\n")
 
-	cmd := strings.Split(input, " ")
+	cmds := strings.Split(input, "|")
 
-	if cmd[0] == "cd" {
-		if len(cmd) < 2 {
-			return errors.New("Please enter the directory path")
+	for i := 1; i <= len(cmds)-1; i += 1 {
+
+		cmds[i-1] = strings.Trim(cmds[i-1], " ")
+		cmds[i] = strings.Trim(cmds[i], " ")
+
+		cmd := strings.Split(cmds[i-1], " ")
+		cmd2 := strings.Split(cmds[i], " ")
+
+		if cmd[0] == "cd" {
+			if len(cmd) < 2 {
+				return errors.New("Please enter the directory path")
+			}
+			return lshCd(cmd[1])
+		} else if cmd[0] == "help" {
+			lshHelp()
+			return nil
+		} else if cmd[0] == "exit" {
+			lshExit()
 		}
-		return lshCd(cmd[1])
-	} else if cmd[0] == "help" {
-		lshHelp()
-		return nil
-	} else if cmd[0] == "exit" {
-		lshExit()
+
+		return lshLaunch(cmd, cmd2)
 	}
 
-	return lshLaunch(cmd)
+	return nil
 }
 
 func lshLoop() {
